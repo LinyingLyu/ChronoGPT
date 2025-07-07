@@ -125,90 +125,6 @@ class Block(nn.Module):
         return x
 
 class ValueEmbedding(nn.Module):
-    def __init__(self, vocab_size, model_dim):
-        super().__init__()
-        self.embed = nn.ModuleList([nn.Embedding(vocab_size, model_dim) for _ in range(3)])
-
-    @torch.inference_mode()
-    def forward(self, inputs):
-        ve = [emb(inputs).bfloat16() for emb in self.embed]
-        ve = [ve[0], ve[1], ve[2], None, None, None, None, None, None, ve[0], ve[1], ve[2]]
-        return ve
-
-class ChronoGPT(nn.Module, PyTorchModelHubMixin):
-    def __init__(self, vocab_size, num_layers, num_heads, model_dim, **kwargs):
-        super().__init__()
-        self.num_heads = num_heads
-        self.vocab_size = vocab_size  # Store vocab_size as instance variable
-        self.embed = nn.Embedding(vocab_size, model_dim)
-        self.blocks = nn.ModuleList([Block(model_dim, num_heads, use_attn=(i != 7))
-                                   for i in range(num_layers)])
-        self.value_embeds = ValueEmbedding(vocab_size, model_dim)
-        self.lm_head = CastedLinear(model_dim, vocab_size)
-        self.lm_head.weight.data.zero_()
-        self.num_encoder_layers = num_layers // 2
-        self.num_decoder_layers = num_layers - self.num_encoder_layers
-        self.skip_weights = nn.Parameter(torch.ones(self.num_decoder_layers))
-    @torch.inference_mode()
-    def forward(self, inputs, past_key_values=None):
-        B = inputs.size(0) 
-        if inputs.dim() == 1:
-            inputs = inputs.unsqueeze(0)  # Add batch dimension if not present
-        
-        x0 = norm(self.embed(inputs).bfloat16())
-        x = x0
-        
-        # Modify value embedding handling for batched input
-        ve = [self.value_embeds(inputs[i].view(-1)) for i in range(B)]
-        ve = [torch.stack([ve[b][i] for b in range(B)]) if ve[0][i] is not None else None 
-              for i in range(len(ve[0]))]
-        ve_enc, ve_dec = ve[:self.num_encoder_layers], ve[self.num_encoder_layers:]
-
-        # Handle cached states for batched input
-        if past_key_values is not None:
-            for i, block in enumerate(self.blocks):
-                if block.attn is not None:
-                    block.attn.kv_cache = past_key_values[i]
-
-        present = []
-        layer_outputs = []
-        skip_connections = []
-
-        # Process through encoder layers
-        for i in range(self.num_encoder_layers):
-            block = self.blocks[i]
-            x = block(x, ve_enc[i], x0)
-            if block.attn is not None:
-                present.append(block.attn.kv_cache)
-                block.attn.kv_cache = None
-            skip_connections.append(x)
-            layer_outputs.append(norm(x))
-
-        # Process through decoder layers
-        for i in range(self.num_decoder_layers):
-            x = x + self.skip_weights[i] * skip_connections.pop()
-            block = self.blocks[self.num_encoder_layers + i]
-            x = block(x, ve_dec[i], x0)
-            layer_outputs.append(norm(x))
-            if block.attn is not None:
-                present.append(block.attn.kv_cache)
-                block.attn.kv_cache = None
-
-        x = norm(x)
-        logits = self.lm_head(x)
-        logits = 15 * torch.tanh(logits / 15)
-
-        return logits.float(), layer_outputs
-    @classmethod
-    def from_pretrained(cls, repo_id, cache_dir=None, **kwargs):
-        config_path = hf_hub_download(repo_id=repo_id, filename="config.pt", cache_dir=cache_dir)
-        bin_path = hf_hub_download(repo_id=repo_id, filename="pytorch_model.bin", cache_dir=cache_dir)
-        config = torch.load(config_path)
-        model = cls(**config)
-        model.load_state_dict(torch.load(bin_path))
-        return model
-
-class ValueEmbedding_xl(nn.Module):
     def __init__(self, vocab_size, model_dim, num_layers=52):
         super().__init__()
         self.num_layers = num_layers
@@ -228,14 +144,14 @@ class ValueEmbedding_xl(nn.Module):
         return encoder + decoder
 
 
-class ChronoGPT_xl(nn.Module, PyTorchModelHubMixin):
+class ChronoGPT(nn.Module, PyTorchModelHubMixin):
     def __init__(self, vocab_size, num_layers, num_heads, model_dim, **kwargs):
         super().__init__()
         self.num_heads = num_heads
         self.vocab_size = vocab_size  # Store vocab_size as instance variable
         self.embed = nn.Embedding(vocab_size, model_dim)
         self.blocks = nn.ModuleList([Block(model_dim, num_heads, use_attn=True) for i in range(num_layers)])
-        self.value_embeds = ValueEmbedding_xl(vocab_size, model_dim, num_layers=num_layers)
+        self.value_embeds = ValueEmbedding(vocab_size, model_dim, num_layers=num_layers)
         self.lm_head = CastedLinear(model_dim, vocab_size)
         self.lm_head.weight.data.zero_()
         self.num_encoder_layers = num_layers // 2
