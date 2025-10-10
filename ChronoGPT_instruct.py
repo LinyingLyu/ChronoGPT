@@ -10,6 +10,9 @@ from huggingface_hub import PyTorchModelHubMixin, hf_hub_download
 def norm(x):
     return F.rms_norm(x, (x.size(-1),))
 
+def extract_response(response_text, input_text):
+    return response_text[len(input_text):].replace("### Response:", "").strip()
+
 def generate(model, idx, max_new_tokens, context_size, temperature=0.0, top_k=None, eos_id=None):
     for _ in range(max_new_tokens):
         idx_cond = idx[:, -context_size:]
