@@ -10,8 +10,24 @@ from huggingface_hub import PyTorchModelHubMixin, hf_hub_download
 def norm(x):
     return F.rms_norm(x, (x.size(-1),))
 
-def extract_response(response_text, input_text):
-    return response_text[len(input_text):].replace("### Response:", "").strip()
+def extract_response(input_text, max_tokens=128, temperature=0.0):
+    system_prompt = """You are ChronoGPT, a large language model trained by ManelaLab at WashU.
+    Below is an instruction that describes a task.
+    Write a response that appropriately completes the request."""
+    
+    formatted_input = f"\n\n### Instruction:\n{system_prompt}\n{input_text}\n\n### Input:\n### Response:\n"
+    
+    token_ids = generate(
+        model=model,
+        idx=text_to_token_ids(formatted_input, tokenizer).to(device),
+        max_new_tokens=max_tokens,
+        context_size=1792,
+        temperature=temperature,
+        eos_id=50256
+    )
+    
+    text = token_ids_to_text(token_ids, tokenizer)
+    return text[len(formatted_input):].replace("### Response:", "").strip()
 
 def generate(model, idx, max_new_tokens, context_size, temperature=0.0, top_k=None, eos_id=None):
     for _ in range(max_new_tokens):
