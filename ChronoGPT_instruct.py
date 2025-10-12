@@ -10,7 +10,7 @@ from huggingface_hub import PyTorchModelHubMixin, hf_hub_download
 def norm(x):
     return F.rms_norm(x, (x.size(-1),))
 
-def extract_response(input_text, max_tokens=128, temperature=0.0):
+def extract_response(input_text, model, max_tokens=128, temperature=0.0):
     system_prompt = """You are ChronoGPT, a large language model trained by ManelaLab at WashU.
     Below is an instruction that describes a task.
     Write a response that appropriately completes the request."""
